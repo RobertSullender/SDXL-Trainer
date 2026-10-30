@@ -1,0 +1,33 @@
+SDXL-Trainer application
+Copyright (c) 2026 SDXL-Trainer contributors. MIT license.
+Complete license text: /usr/share/doc/sdxl-trainer/LICENSE.
+
+SDXL-Trainer bundles dynamically linked third-party runtime components.
+
+llama.cpp 0.8.0 / b11960
+Copyright (c) 2023-2026 The ggml authors. MIT license.
+Complete upstream MIT notice: runtime/llama/libexec/LICENSE under /opt/sdxl-trainer.
+Pinned source: https://github.com/ggml-org/llama.cpp/tree/8642541b255bfb5dc39cd351a178be09013a55d6
+
+Qt for Python / PySide6 and Shiboken6 6.10.2
+Copyright The Qt Company Ltd. and contributors.
+Distributed using LGPL version 3, with applicable Qt exceptions.
+The dynamically linked libraries can be replaced by compatible user builds;
+no signature check or restriction prevents replacement or debugging.
+LGPL-3 and GPL-3 license texts are included with this installer.
+Corresponding source:
+https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.10.2-src/
+https://download.qt.io/official_releases/qt/6.10/6.10.2/single/
+Third-party notices and licensing details:
+https://doc.qt.io/qt-6/licenses-used-in-qt.html
+https://doc.qt.io/qtforpython-6/licenses.html
+
+NVIDIA CUDA 12.8 runtime / cuBLAS redistribution
+Copyright NVIDIA Corporation. All rights reserved.
+The official CUDA 12.8 EULA is included as NVIDIA-CUDA-12.8-EULA.html.
+Only the redistributable cudart and cuBLAS shared libraries from the official
+llama.cpp CUDA runtime distribution are included; no NVIDIA driver is bundled.
+
+Python, Pillow, Enchant/Hunspell and desktop system libraries are provided by
+Ubuntu dependencies under their respective licenses and copyright notices.
+Model weights are supplied locally by the user and are not distributed here.

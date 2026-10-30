@@ -1,0 +1,20 @@
+{
+  "project": "ggml-org/llama.cpp",
+  "version": "0.8.0",
+  "tag": "b11960",
+  "commit": "8642541b255bfb5dc39cd351a178be09013a55d6",
+  "platform": "ubuntu-cuda-12.8-x64",
+  "source_url": "https://github.com/ggml-org/llama.cpp/tree/8642541b255bfb5dc39cd351a178be09013a55d6",
+  "assets": [
+    {
+      "name": "llama-b11960-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11960/llama-b11960-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "sha256": "64d57beb9abb637c177c6afb313760a0c0782224cac71e74869eed5b8f9a1ea4"
+    },
+    {
+      "name": "cudart-llama-b11960-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11960/cudart-llama-b11960-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "sha256": "7c4d5974bd39649df649649e5d71950688a70e37aaae00bf11afbb656ea2cc56"
+    }
+  ]
+}

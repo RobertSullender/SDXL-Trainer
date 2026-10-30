@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+APP_ROOT=/opt/sdxl-trainer
+export PYTHONPATH="$APP_ROOT/src:$APP_ROOT/lib${PYTHONPATH:+:$PYTHONPATH}"
+export QT_PLUGIN_PATH="$APP_ROOT/lib/PySide6/Qt/plugins"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_HUB_DISABLE_TELEMETRY=1
+export DO_NOT_TRACK=1
+exec /usr/bin/python3 -m sdxl_trainer "$@"

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SDXL-Trainer
+GenericName=Offline SDXL Dataset and Model Trainer
+Comment=Prepare private datasets and train SDXL locally
+Exec=sdxl-trainer
+Icon=sdxl-trainer
+Terminal=false
+Categories=Graphics;Education;Science;
+Keywords=SDXL;LoRA;Diffusers;Dataset;Training;
+StartupNotify=true
+StartupWMClass=SDXL-Trainer
