@@ -4,7 +4,7 @@ A native dark desktop application for private SDXL dataset creation, GGUF vision
 
 The target system is Ubuntu 26.04.1 LTS with an NVIDIA RTX 5080 (16 GB VRAM) and 32 GB system RAM. Other configurations have not been validated.
 
-![SDXL-Trainer dark desktop interface with dataset preparation, image preview, and caption editor](docs/images/sdxl-trainer.png)
+![SDXL-Trainer dark desktop interface with dataset preparation, image preview, and caption editor](docs/images/SDXL-Trainer-0.1.34.png)
 
 **Status: 0.1.34 development build.** The application starts with faster UNet-only training defaults for LoRA and full fine-tuning, while retaining all component, precision, caption-context, optimizer, and offload choices. Dataset integrity, desktop workflows, downloader behavior, packaging, and tiny SDXL training are tested. On the RTX 5080 Laptop GPU, the fast full-caption LoRA and full fine-tune paths each completed two distinct images, including 1,225-token and 905-token captions, saved checkpoints, and produced Diffusers outputs. These short checks do not establish long-run quality or memory fit for an entire dataset. See [VALIDATION.md](VALIDATION.md) for measured results and their limits. Full training with text encoders and VAE remains experimental on 16 GB; longer runs and output quality require validation.
 
