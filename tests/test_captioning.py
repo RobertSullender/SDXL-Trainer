@@ -81,13 +81,53 @@ def test_private_vision_request_uses_exact_png_and_all_controls(config, tmp_path
     assert not server.running
 
 
-def test_partial_caption_rejected_instead_of_saved(config, tmp_path, monkeypatch):
+def test_partial_caption_is_preserved_with_warning_at_continuation_limit(config, tmp_path, monkeypatch):
     path = tmp_path / "Img-1.png"
     Image.new("RGB", (64, 64)).save(path)
     monkeypatch.setenv("FAKE_REASON", "length")
+    config.max_continuations = 0
     with CaptionServer(config) as server:
-        with pytest.raises(CaptionError, match="Partial captions were not saved"):
-            server.caption(path)
+        result = server.caption(path)
+    assert result == "A red square."
+    assert result.truncated and "limit" in result.reason
+
+
+def test_length_limited_caption_automatically_continues(config, tmp_path):
+    path = tmp_path / "Img-1.png"
+    Image.new("RGB", (64, 64)).save(path)
+    requests = []
+    responses = [
+        {"choices": [{"finish_reason": "length", "message": {"content": "A red square"}}]},
+        {"choices": [{"finish_reason": "stop", "message": {"content": " on a blue background."}}]},
+    ]
+    with CaptionServer(config) as server:
+        def request(method, url, payload, timeout):
+            import copy
+            requests.append(copy.deepcopy(payload))
+            return responses.pop(0)
+        server._request = request
+        result = server.caption(path)
+    assert result == "A red square on a blue background."
+    assert not result.truncated
+    assert len(requests) == 2
+    assert len(requests[1]["messages"]) == 3
+    assert requests[1]["messages"][-1] == {"role": "assistant", "content": "A red square"}
+
+
+def test_failed_continuation_preserves_usable_partial_caption(config, tmp_path):
+    path = tmp_path / "Img-1.png"
+    Image.new("RGB", (64, 64)).save(path)
+    responses = iter([{"choices": [{"finish_reason": "length", "message": {"content": "A red square"}}]}, CaptionError("context full")])
+    with CaptionServer(config) as server:
+        def request(*args):
+            value = next(responses)
+            if isinstance(value, Exception):
+                raise value
+            return value
+        server._request = request
+        result = server.caption(path)
+    assert result == "A red square"
+    assert result.truncated and "context full" in result.reason
 
 
 def test_cancel_generation_unloads_backend(config, tmp_path, monkeypatch):
@@ -168,3 +208,69 @@ def test_real_offline_spellcheck_when_available():
         assert checker.check("photogrraph")
     finally:
         checker.close()
+
+
+@pytest.mark.parametrize(('parts', 'expected'), [
+    (['water', 'fall.'], 'waterfall.'),
+    (['Hello', ', world.'], 'Hello, world.'),
+    (['A square  ', 'and a circle.'], 'A square  and a circle.'),
+    (['A wave', ' of light.'], 'A wave of light.'),
+    (['ha', 'ha'], 'haha'),
+    (['water', '<think>\n\n</think>\n\nfall'], 'waterfall'),
+])
+def test_continuations_preserve_exact_segment_boundaries(config, tmp_path, parts, expected):
+    path = tmp_path / 'Img-1.png'
+    Image.new('RGB', (64, 64)).save(path)
+    responses = iter([
+        {'choices':[{'finish_reason':'length', 'message':{'content':parts[0]}}]},
+        {'choices':[{'finish_reason':'stop', 'message':{'content':parts[1]}}]},
+    ])
+    with CaptionServer(config) as server:
+        server._request = lambda *args: next(responses)
+        result = server.caption(path)
+    assert result == expected
+    assert not result.truncated
+
+
+def test_multiple_prefill_continuations_use_the_complete_unmodified_prefix(config, tmp_path):
+    import copy
+    path = tmp_path / 'Img-1.png'
+    Image.new('RGB', (64,64)).save(path)
+    calls = []
+    replies = iter([
+        {'choices':[{'finish_reason':'length','message':{'content':'A water'}}]},
+        {'choices':[{'finish_reason':'length','message':{'content':'fall,'}}]},
+        {'choices':[{'finish_reason':'stop','message':{'content':' at dusk.'}}]},
+    ])
+    with CaptionServer(config) as server:
+        def request(_method, _url, payload, _timeout):
+            calls.append(copy.deepcopy(payload))
+            return next(replies)
+        server._request = request
+        result = server.caption(path)
+    assert result == 'A waterfall, at dusk.'
+    assert not result.truncated
+    assert [request['messages'][-1].get('content') for request in calls[1:]] == ['A water', 'A waterfall,']
+    assert all(len(request['messages']) == 3 for request in calls[1:])
+
+
+def test_prefill_echo_is_not_duplicated_and_boundaries_are_preserved(config, tmp_path):
+    import copy
+    path = tmp_path / 'Img-1.png'
+    Image.new('RGB', (64, 64)).save(path)
+    requests = []
+    replies = iter([
+        {'choices': [{'finish_reason':'length', 'message':{'content':'A water'}}]},
+        {'choices': [{'finish_reason':'length', 'message':{'content':'A waterfall,'}}]},
+        {'choices': [{'finish_reason':'stop', 'message':{'content':'A waterfall, at dusk.'}}]},
+    ])
+    with CaptionServer(config) as server:
+        def request(_method, _url, payload, _timeout):
+            requests.append(copy.deepcopy(payload))
+            return next(replies)
+        server._request = request
+        result = server.caption(path)
+    assert result == 'A waterfall, at dusk.'
+    assert not result.truncated
+    assert requests[1]['messages'][-1]['content'] == 'A water'
+    assert requests[2]['messages'][-1]['content'] == 'A waterfall,'

@@ -8,6 +8,7 @@ separate user-selected ML runtime and are not silently downloaded at launch.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import importlib.util
 import json
@@ -30,6 +31,40 @@ DEBIAN_DEPENDS = (
     "libxcb1, libx11-6, libwayland-client0, libwayland-cursor0, libwayland-egl1, "
     "libgtk-3-0t64"
 )
+
+
+def application_version() -> str:
+    """Read the source version without importing the app, Qt or any ML library."""
+    module = ast.parse((ROOT / "src/sdxl_trainer/__init__.py").read_text())
+    for statement in module.body:
+        if isinstance(statement, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "__version__" for target in statement.targets):
+            version = ast.literal_eval(statement.value)
+            if isinstance(version, str) and re.fullmatch(r"[0-9][0-9A-Za-z.+~:-]*", version):
+                return version
+            break
+    raise ValueError("Application source must define a literal, valid __version__ string.")
+
+
+def normalize_package_permissions(stage: Path) -> None:
+    """Set installed modes explicitly rather than preserving private build modes."""
+    executables = {
+        "DEBIAN/postinst",
+        "usr/bin/sdxl-trainer",
+        "opt/sdxl-trainer/runtime/llama/llama-server",
+        "opt/sdxl-trainer/runtime/llama/libexec/llama-server",
+    }
+    root = stage.resolve()
+    for path in [stage, *stage.rglob("*")]:
+        if path.is_symlink():
+            if not path.resolve().is_relative_to(root):
+                raise ValueError(f"Package symlink escapes the staged installation: {path}")
+            continue
+        if path.is_dir():
+            path.chmod(0o755)
+        elif path.is_file():
+            path.chmod(0o755 if path.relative_to(stage).as_posix() in executables else 0o644)
+        else:
+            raise ValueError(f"Unsupported packaged file type: {path}")
 
 
 def digest(path: Path) -> str:
@@ -120,7 +155,8 @@ def bundle_qt(site_packages: Path, destination: Path) -> int:
     return sum(p.stat().st_size for p in destination.rglob("*") if p.is_file())
 
 
-def build(llama_dir: Path, qt_site_packages: Path, output: Path, version: str = "0.1.0") -> Path:
+def build(llama_dir: Path, qt_site_packages: Path, output: Path, version: str | None = None) -> Path:
+    version = application_version() if version is None else version
     if not re.fullmatch(r"[0-9][0-9A-Za-z.+~:-]*", version):
         raise ValueError("Invalid Debian package version.")
     if subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip() != "amd64":
@@ -128,6 +164,7 @@ def build(llama_dir: Path, qt_site_packages: Path, output: Path, version: str = 
     validate_llama(llama_dir)
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
+    (ROOT / "build").mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="sdxl-deb-", dir=ROOT / "build") as temporary:
         stage = Path(temporary)
         app = stage / "opt/sdxl-trainer"
@@ -160,9 +197,11 @@ def build(llama_dir: Path, qt_site_packages: Path, output: Path, version: str = 
             " Native Qt desktop with image preparation, caption review, offline wiki,\n"
             " local training controls, and a pinned bundled llama.cpp CUDA 12.8 engine.\n"
             " Model weights and a compatible ML Python runtime are supplied locally.\n")
+        _copy_file(ROOT / "packaging/postinst", stage / "DEBIAN/postinst")
         (app / "build-info.json").write_text(json.dumps({"version": version, "qt": QT_VERSION,
               "llama": "0.8.0/b11960", "cuda": "12.8", "qt_bytes": qt_bytes,
               "training_runtime_bundled": False}, indent=2) + "\n")
+        normalize_package_permissions(stage)
         subprocess.run(["dpkg-deb", "--root-owner-group", "-Zzstd", "-z6", "--build", str(stage), str(output)], check=True)
     (output.with_suffix(output.suffix + ".sha256")).write_text(f"{digest(output)}  {output.name}\n")
     return output
@@ -182,10 +221,12 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--llama-dir", type=Path, default=ROOT / "build/llama-runtime")
     parser.add_argument("--qt-site-packages", type=Path)
-    parser.add_argument("--output", type=Path, default=ROOT / "dist/sdxl-trainer_0.1.0_amd64.deb")
-    parser.add_argument("--version", default="0.1.0")
+    parser.add_argument("--output", type=Path, help="Output .deb filename (defaults to dist/sdxl-trainer_VERSION_amd64.deb)")
+    parser.add_argument("--version", help="Override the version read from the application source")
     args = parser.parse_args(argv)
-    print(build(args.llama_dir.resolve(), args.qt_site_packages or default_qt_path(), args.output, args.version))
+    version = args.version if args.version is not None else application_version()
+    output = args.output or ROOT / "dist" / f"sdxl-trainer_{version}_amd64.deb"
+    print(build(args.llama_dir.resolve(), args.qt_site_packages or default_qt_path(), output, version))
     return 0
 
 

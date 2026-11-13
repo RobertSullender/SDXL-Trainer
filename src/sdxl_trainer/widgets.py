@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (
     QLineEdit, QMenu, QPlainTextEdit, QPushButton, QSpinBox, QWidget,
 )
 
+from . import file_dialogs
+from .theme import FILE_DIALOG_OPTIONS
+
 
 class Task(QThread):
     result = Signal(object)
@@ -33,6 +36,7 @@ class Task(QThread):
 
 class PathField(QWidget):
     changed = Signal(str)
+    path_selected = Signal(str, str)
 
     def __init__(self, value="", kind="directory", parent=None):
         super().__init__(parent)
@@ -50,13 +54,15 @@ class PathField(QWidget):
 
     def browse(self):
         if self.kind == "directory":
-            path = QFileDialog.getExistingDirectory(self, "Choose folder", self.value())
+            path = file_dialogs.get_existing_directory(self, "Choose folder", self.value(), options=FILE_DIALOG_OPTIONS)
         elif self.kind == "save":
-            path, _ = QFileDialog.getSaveFileName(self, "Save checkpoint", self.value(), "Safetensors (*.safetensors)")
+            path, _ = file_dialogs.get_save_file_name(self, "Save checkpoint", self.value(), "Safetensors (*.safetensors)", options=FILE_DIALOG_OPTIONS)
         else:
-            path, _ = QFileDialog.getOpenFileName(self, "Choose local file", self.value())
+            path, _ = file_dialogs.get_open_file_name(self, "Choose local file", self.value(), options=FILE_DIALOG_OPTIONS)
         if path:
+            previous = self.value()
             self.set_value(path)
+            self.path_selected.emit(self.value(), previous)
 
     def value(self):
         return self.edit.text().strip()
@@ -70,6 +76,24 @@ CHOICES = {
     "device": ["cuda", "cpu"], "optimizer": ["adamw", "adamw_disk", "sgd"],
     "lr_scheduler": ["constant", "linear", "cosine"],
     "flash_attention": ["auto", "on", "off"],
+}
+
+# The values are part of saved recipes and checkpoint identities; keep them
+# stable while giving the user plain-language choices in the interface.
+CHOICE_LABELS = {
+    "optimizer": {
+        "adamw_disk": "Disk AdamW · FP32 moments / masters",
+        "paged_adamw8bit": "Paged AdamW · 8-bit moments (direct weights)",
+        "adamw": "AdamW · device memory",
+        "sgd": "SGD · device memory",
+    },
+    "component_offload": {
+        "none": "No component offload",
+        "text_encoders_cpu": "Text encoders on CPU",
+        "text_and_vae_cpu": "Text encoders and VAE on CPU",
+        "text_cpu_staged_unet": "Text encoders on CPU; move UNet for VAE",
+        "stage_unet_gpu_text": "Text encoders on GPU; move UNet for VAE",
+    },
 }
 
 
@@ -102,8 +126,17 @@ class ConfigForm(QWidget):
                 widget.setChecked(value)
             elif "choices" in field.metadata or name in CHOICES:
                 widget = QComboBox()
-                widget.addItems(field.metadata.get("choices", CHOICES.get(name, [])))
-                widget.setCurrentText(str(value))
+                choices = field.metadata.get("choices", CHOICES.get(name, []))
+                labels = CHOICE_LABELS.get(name)
+                if labels is None:
+                    widget.addItems(choices)
+                    widget.setCurrentText(str(value))
+                else:
+                    for choice in choices:
+                        widget.addItem(labels.get(choice, choice), choice)
+                    index = widget.findData(value)
+                    if index >= 0:
+                        widget.setCurrentIndex(index)
             elif isinstance(value, int):
                 widget = QSpinBox()
                 widget.setRange(int(field.metadata.get("min", -1 if name in {"seed", "gpu_layers", "repeat_last_n"} else 0)),
@@ -119,6 +152,9 @@ class ConfigForm(QWidget):
                 widget = QPlainTextEdit(str(value))
                 widget.setMinimumHeight(110)
                 widget.setMaximumHeight(170)
+                # A blank editor still shows what its project-local reset uses.
+                from .captioning import CaptionConfig
+                widget.setPlaceholderText(getattr(CaptionConfig(), name))
             elif name.endswith(("_path", "_dir", "_from", "_executable")):
                 kind = "file" if name in {"server_executable", "mmproj_path"} else "directory"
                 if name == "model_path" and hasattr(config, "mmproj_path"):
@@ -136,7 +172,7 @@ class ConfigForm(QWidget):
             if isinstance(widget, QCheckBox):
                 value = widget.isChecked()
             elif isinstance(widget, QComboBox):
-                value = widget.currentText()
+                value = widget.currentData() if name in CHOICE_LABELS else widget.currentText()
             elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
                 value = widget.value()
             elif isinstance(widget, QPlainTextEdit):
@@ -156,7 +192,12 @@ class ConfigForm(QWidget):
             if isinstance(widget, QCheckBox):
                 widget.setChecked(bool(value))
             elif isinstance(widget, QComboBox):
-                widget.setCurrentText(str(value))
+                if name in CHOICE_LABELS:
+                    index = widget.findData(value)
+                    if index >= 0:
+                        widget.setCurrentIndex(index)
+                else:
+                    widget.setCurrentText(str(value))
             elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
                 widget.setValue(value)
             elif isinstance(widget, QPlainTextEdit):

@@ -9,7 +9,7 @@ import pytest
 
 from sdxl_trainer.downloader import (DownloadCancelled, DownloadError, HuggingFaceDownloader,
                                      PRESETS, RemoteFile, RepositorySnapshot, SDXL_TRAINING_FILES,
-                                     normalize_repository, selected_training_files)
+                                     model_library_destination, normalize_repository, selected_training_files)
 
 
 COMMIT = "a" * 40
@@ -208,6 +208,31 @@ def test_user_variants_include_matching_projector():
     assert len(caption_presets) == 2
     assert all(preset["model_filename"].endswith("Q8_0.gguf") for preset in caption_presets)
     assert all(preset["mmproj_filename"].startswith("mmproj-Qwen3.5-9B") for preset in caption_presets)
+
+
+def test_sdxl_fp16_preset_selects_only_matching_variant_weights():
+    preset = next(p for p in PRESETS if p["name"].endswith("Diffusers FP16 variant"))
+    files = preset["filenames"]
+    weights = [name for name in files if name.endswith(".safetensors")]
+    assert weights == [
+        "unet/diffusion_pytorch_model.fp16.safetensors",
+        "text_encoder/model.fp16.safetensors",
+        "text_encoder_2/model.fp16.safetensors",
+        "vae/diffusion_pytorch_model.fp16.safetensors",
+    ]
+    assert "model_index.json" in files
+    assert "tokenizer/vocab.json" in files and "tokenizer_2/vocab.json" in files
+    assert preset["model_variant"] == "fp16"
+
+
+def test_fp16_preset_has_separate_library_directory(tmp_path):
+    preset = next(p for p in PRESETS if p.get("model_variant") == "fp16")
+    repo = preset["repo_id"]
+    default = model_library_destination(tmp_path, repo)
+    variant = model_library_destination(tmp_path, repo, preset)
+    assert variant != default
+    assert variant.name == default.name + "--fp16"
+    assert model_library_destination(tmp_path, "owner/other", preset) == tmp_path / "owner--other"
 
 
 def test_training_selection_requires_all_components_and_excludes_duplicate_formats():

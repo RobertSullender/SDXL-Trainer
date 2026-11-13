@@ -7,12 +7,20 @@ from pathlib import Path
 import tempfile
 
 
+TRAINING_DEFAULTS_VERSION = 1
+
+
 def config_dir() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "sdxl-trainer"
 
 
 def data_dir() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "sdxl-trainer"
+
+
+def projects_dir() -> Path:
+    """Writable project workspace beside the user's home-folder source checkout."""
+    return Path.home() / "SDXL-Trainer" / "projects"
 
 
 def atomic_json(path: Path, data: dict) -> None:
@@ -35,6 +43,21 @@ def load_settings() -> dict:
         return json.loads((config_dir() / "settings.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+
+
+def migrate_training_defaults(settings: dict) -> bool:
+    """Select the fast profile once without touching caption or experiment data."""
+    version = settings.get("training_defaults_version", 0)
+    if isinstance(version, int) and version >= TRAINING_DEFAULTS_VERSION:
+        return False
+    # The training config module has no Qt or ML-runtime imports.
+    from .training.config import fast_training_settings
+    previous = settings.get("training", {})
+    training = dict(previous) if isinstance(previous, dict) else {}
+    training.update(fast_training_settings(training.get("mode", "lora")))
+    settings["training"] = training
+    settings["training_defaults_version"] = TRAINING_DEFAULTS_VERSION
+    return True
 
 
 def offline_environment() -> dict[str, str]:

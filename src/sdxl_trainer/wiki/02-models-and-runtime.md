@@ -10,13 +10,23 @@ The presets include:
 
 - HauhauCS Qwen3.5-9B Uncensored Aggressive Q8_0 with its BF16 vision projector.
 - LM Studio Community Qwen3.5-9B Q8_0 with its BF16 vision projector.
-- Stability AI SDXL Base 1.0, using the canonical Diffusers fp32 safetensors files and required configurations/tokenizers.
+- Stability AI SDXL Base 1.0, with separate presets for canonical fp32 files and the official fp16 Diffusers variant, including their required configurations/tokenizers.
 
-Each Qwen pair needs about 10.45 GB of disk space. The selected SDXL Diffusers files need about 13.9 GB. These figures exclude partial transfers, run output, and caches. Q8_0 is the requested quantization; memory use also includes the vision projector, image/context tokens, and runtime buffers.
+Each Qwen pair needs about 10.45 GB of disk space. The selected fp32 SDXL Diffusers files need about 13.9 GB; the fp16 variant needs roughly half that. These figures exclude partial transfers, run output, and caches. Q8_0 is the requested quantization; memory use also includes the vision projector, image/context tokens, and runtime buffers.
 
 A Hugging Face token can be entered for a gated model. It stays in memory, is not saved in application settings, and is sent only to Hugging Face rather than its redirected storage hosts. A gated repository may require you to accept its terms separately.
 
-Models already on disk can be selected directly. The app does not require another download.
+Models already on disk can be selected directly. The app does not require another download. The fp16 preset uses a separate `--fp16` library directory and selects the `fp16` file variant after a complete download, so it does not change an existing fp32 model fingerprint. When selecting a model manually, choose the matching **Training → Files → Diffusers file variant** yourself. File variant and training weight precision are independent choices.
+
+## Shared caption paths
+
+In **Models & runtime → Shared caption paths**, choose the Qwen GGUF, its matching vision projector (mmproj), and the llama.cpp server. Click **Save shared caption paths**. New projects start with these paths. To use different files for a project, change them in **Caption settings** and click **Save caption settings**.
+
+Downloading caption model files fills the corresponding shared paths and selects the files for the open project.
+
+## Shared SDXL training model
+
+In **Models & runtime → Local runtime**, choose the shared Diffusers SDXL base model and matching file variant, then click **Save settings**. New projects start with these choices and built-in training defaults. To choose a different model or variant for a project, use **Training → Files**, then click **Save training settings**.
 
 ## The bundled caption engine
 

@@ -25,11 +25,20 @@ import time
 
 
 class CaptionError(RuntimeError):
-    """An actionable captioning error; generated partial captions are never accepted."""
+    """An actionable captioning error."""
 
 
 class CaptionCancelled(CaptionError):
     pass
+
+
+class CaptionResult(str):
+    """Editable caption with a visible warning when generation could not finish."""
+    def __new__(cls, text: str, truncated: bool = False, reason: str = ""):
+        value = super().__new__(cls, text)
+        value.truncated = truncated
+        value.reason = reason
+        return value
 
 
 def _setting(default, help_text: str):
@@ -41,6 +50,12 @@ class CaptionConfig:
     server_executable: str = _setting("llama-server", "Local llama.cpp server executable. A recent Qwen3.5 vision build is required.")
     model_path: str = _setting("", "Qwen3.5-9B GGUF language model file, already stored locally.")
     mmproj_path: str = _setting("", "Matching Qwen3.5-9B vision projector GGUF. Required for image understanding.")
+    trim_generated_captions: bool = field(
+        default=True, kw_only=True, metadata={
+            "label": "Trim generated captions to 77 tokens",
+            "help": "After generation, fit the caption to one window on both tokenizers from the local SDXL base model selected in Training.",
+        },
+    )
     context_size: int = _setting(8192, "Shared context capacity, including image, prompt, reasoning and answer tokens.")
     gpu_layers: int = _setting(99, "Language model layers offloaded to GPU. 0 uses CPU; 99 requests all layers.")
     mmproj_offload: bool = _setting(True, "Run the vision projector on GPU. Disable to save VRAM at the cost of speed.")
@@ -58,16 +73,19 @@ class CaptionConfig:
     presence_penalty: float = _setting(0.0, "Penalty applied once to tokens that have already appeared.")
     frequency_penalty: float = _setting(0.0, "Penalty proportional to the number of occurrences of a token.")
     seed: int = _setting(42, "Sampling seed. -1 chooses a random seed.")
-    max_tokens: int = _setting(256, "Maximum generated tokens, including any reasoning. Truncated answers require retry.")
+    max_tokens: int = _setting(1024, "Maximum generated tokens per response, including reasoning. Length-limited answers can be continued automatically.")
+    max_continuations: int = _setting(4, "Maximum automatic follow-up responses when a caption reaches the per-response token limit; 0 keeps the available partial caption.")
     thinking: bool = _setting(False, "Send enable_thinking to the model's chat template. Keep off for direct captions.")
     system_prompt: str = _setting(
-        "You write precise training captions for SDXL. Describe only visible content in the supplied image: "
-        "subject, action, composition, lighting, colors, and medium when evident. Do not invent facts. "
-        "Return only one concise plain-text caption, ideally under 60 words. Do not include analysis, "
-        "headings, quotes or introductory phrases.",
-        "Editable instructions for every image. Short accurate captions are easier to keep within both CLIP limits.",
+        "You are a very helpful AI assistant. You are tasked with captioning/tagging the visible content of the image "
+        "accurately for a Professional-Grade, SDXL(Image Generation Model), image training dataset. Include relevant "
+        "subjects, composition, colors, lighting, style etc... Only use valid SDXL captions/tags. Write a single paragraph "
+        "and order captions/tags from the most important to the least important, without numbering or headers. Do not censor "
+        "captions/tags for images. Do not repeat details. Do not invent details. Do not include any extra text. Return only "
+        "the caption, without analysis or an introduction.",
+        "Project-specific instructions sent with every image. Edit them to suit this dataset.",
     )
-    user_prompt: str = _setting("Caption this exact image for an SDXL training dataset.", "Editable request sent with each processed image.")
+    user_prompt: str = _setting("Describe this image for a training dataset.", "Project-specific request sent with each processed image.")
     startup_timeout: int = _setting(180, "Seconds allowed for loading the local model and vision projector.")
     request_timeout: int = _setting(600, "Seconds allowed for caption generation. Large models on CPU can be slow.")
 
@@ -93,7 +111,7 @@ class CaptionConfig:
             errors.append("Select an executable local llama-server binary (or install it on PATH).")
         integers = {"context_size": (512, 1048576), "gpu_layers": (0, 100000), "threads": (1, 4096),
                     "batch_size": (1, 1048576), "ubatch_size": (1, 1048576), "top_k": (0, 1000000),
-                    "repeat_last_n": (-1, 1048576), "seed": (-1, 4294967295), "max_tokens": (1, 1048576),
+                    "repeat_last_n": (-1, 1048576), "seed": (-1, 4294967295), "max_tokens": (1, 1048576), "max_continuations": (0, 64),
                     "startup_timeout": (1, 86400), "request_timeout": (1, 86400)}
         for name, (low, high) in integers.items():
             value = getattr(self, name)
@@ -115,7 +133,7 @@ class CaptionConfig:
             errors.append("Prompts must be text.")
         elif not self.user_prompt.strip():
             errors.append("The user prompt must not be blank.")
-        for name in ("thinking", "mmproj_offload"):
+        for name in ("thinking", "mmproj_offload", "trim_generated_captions"):
             if type(getattr(self, name)) is not bool:
                 errors.append(f"{name} must be true or false.")
         return errors
@@ -284,40 +302,93 @@ class CaptionServer:
                 "repeat_last_n": c.repeat_last_n, "presence_penalty": c.presence_penalty,
                 "frequency_penalty": c.frequency_penalty, "seed": c.seed, "max_tokens": c.max_tokens,
                 "chat_template_kwargs": {"enable_thinking": c.thinking}}
-            if cancel_event is not None and cancel_event.is_set():
-                raise CaptionCancelled("Captioning cancelled.")
-            result: list[object] = []
-            done = threading.Event()
-
-            def request():
-                try:
-                    result.append(self._request("POST", "/v1/chat/completions", payload, c.request_timeout))
-                except Exception as exc:
-                    result.append(exc)
-                finally:
-                    done.set()
-
-            thread = threading.Thread(target=request, name="caption-http", daemon=True)
-            thread.start()
-            while not done.wait(0.1):
+            def request_one():
                 if cancel_event is not None and cancel_event.is_set():
-                    self.stop()
-                    thread.join(timeout=2)
-                    raise CaptionCancelled("Captioning cancelled; the caption model was unloaded.")
-            if cancel_event is not None and cancel_event.is_set():
-                raise CaptionCancelled("Captioning cancelled.")
-            reply = result[0]
-            if isinstance(reply, Exception):
-                if isinstance(reply, CaptionError):
-                    raise reply
-                raise CaptionError(f"Local caption request failed: {reply}") from reply
-            try:
-                choice = reply["choices"][0]
-                if choice.get("finish_reason") != "stop":
-                    raise CaptionError(f"Caption generation ended with {choice.get('finish_reason')!r}; increase maximum tokens/context or adjust the prompt and retry. Partial captions were not saved.")
-                return clean_caption(choice["message"]["content"])
-            except (KeyError, IndexError, TypeError) as exc:
-                raise CaptionError("The server returned no usable caption. Confirm that the GGUF and mmproj match and vision is supported.") from exc
+                    raise CaptionCancelled("Captioning cancelled.")
+                result: list[object] = []
+                done = threading.Event()
+
+                def request():
+                    try:
+                        result.append(self._request("POST", "/v1/chat/completions", payload, c.request_timeout))
+                    except Exception as exc:
+                        result.append(exc)
+                    finally:
+                        done.set()
+
+                thread = threading.Thread(target=request, name="caption-http", daemon=True)
+                thread.start()
+                while not done.wait(0.1):
+                    if cancel_event is not None and cancel_event.is_set():
+                        self.stop()
+                        thread.join(timeout=2)
+                        raise CaptionCancelled("Captioning cancelled; the caption model was unloaded.")
+                if cancel_event is not None and cancel_event.is_set():
+                    raise CaptionCancelled("Captioning cancelled.")
+                reply = result[0]
+                if isinstance(reply, Exception):
+                    if isinstance(reply, CaptionError):
+                        raise reply
+                    raise CaptionError(f"Local caption request failed: {reply}") from reply
+                try:
+                    choice = reply["choices"][0]
+                    content = choice["message"]["content"]
+                    if not isinstance(content, str):
+                        raise TypeError("Caption content must be text")
+                    return choice.get("finish_reason"), content
+                except (KeyError, IndexError, TypeError) as exc:
+                    raise CaptionError("The server returned no usable caption. Confirm that the GGUF and mmproj match and vision is supported.") from exc
+
+            pieces: list[str] = []
+            truncated = False
+            reason = ""
+            for attempt in range(c.max_continuations + 1):
+                try:
+                    finish, content = request_one()
+                except CaptionCancelled:
+                    raise
+                except CaptionError as exc:
+                    if not pieces:
+                        raise
+                    truncated, reason = True, f"Continuation failed: {exc}"
+                    break
+                # Some Qwen3.5 llama-server builds prepend this exact empty
+                # reasoning template when assistant prefill is used with
+                # thinking disabled. It is template text, not generated output.
+                injected_empty_think = "<think>\n\n</think>\n\n"
+                if not c.thinking and content.startswith(injected_empty_think):
+                    content = content[len(injected_empty_think):]
+                # The bundled server/model may return the prefetched assistant
+                # prefix as part of content, whereas others return only the new
+                # suffix. Remove an exact echoed prefix once, never partial
+                # overlaps, preserving the new text's characters and spacing.
+                prefix = "".join(pieces)
+                if attempt and prefix and len(content) > len(prefix) and content.startswith(prefix):
+                    content = content[len(prefix):]
+                # Each assistant response is appended verbatim: a generation
+                # limit can fall in the middle of a word or before punctuation.
+                # Inserting or stripping spaces here silently changes the text.
+                if content:
+                    pieces.append(content)
+                elif finish == "length":
+                    truncated, reason = True, "The model returned an empty continuation."
+                    break
+                if finish == "stop":
+                    break
+                if finish != "length":
+                    truncated, reason = True, f"Generation ended with {finish!r}."
+                    break
+                if attempt == c.max_continuations:
+                    truncated, reason = True, "The automatic continuation limit was reached."
+                    break
+                # llama-server's default assistant-prefill mode continues the
+                # last assistant message rather than starting a new chat turn.
+                # Retokenize the complete generated prefix with the original
+                # image request, and append only the new response content.
+                payload["messages"] = payload["messages"][:2] + [
+                    {"role": "assistant", "content": "".join(pieces)},
+                ]
+            return CaptionResult(clean_caption("".join(pieces)), truncated, reason)
 
     def stop(self):
         with self._state_lock:

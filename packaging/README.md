@@ -24,8 +24,10 @@ python3 scripts/prepare_llama.py --offline --output build/llama-runtime-new
 python3 scripts/build_deb.py --llama-dir build/llama-runtime-new
 ```
 
-The second command outputs `dist/sdxl-trainer_0.1.0_amd64.deb` and its SHA-256
-checksum. Package assembly never downloads anything. It refuses an engine with
+The second command outputs `dist/sdxl-trainer_0.1.34_amd64.deb` and its SHA-256
+checksum. The default package version and filename are read from
+`src/sdxl_trainer/__init__.py`. The commands shown use version 0.1.34.
+Package assembly never downloads anything. It refuses an engine with
 a mismatched lock or changed files. Existing runtime output directories are
 never replaced. The `.deb` itself may be rebuilt as source changes.
 
@@ -33,7 +35,10 @@ Installed application source is under `/opt/sdxl-trainer/src`, its Qt runtime
 under `/opt/sdxl-trainer/lib`, and its engine launcher is
 `/opt/sdxl-trainer/runtime/llama/llama-server`. It loads its shared libraries
 from its private `libexec` folder. These files and relevant licenses are
-included in the package. Models, projects, datasets and training environments
+included in the package. Build scripts explicitly set all installed directories
+to mode 0755, runtime launchers and the server binary to 0755, and data/shared
+libraries to 0644. Private temporary build-directory modes are never inherited
+by the installed runtime. Models, projects, datasets and training environments
 are not installed into `/opt` or removed with the application.
 
 The initial package is approximately 680 MiB (about 1.16 GiB installed).
@@ -43,8 +48,8 @@ headers, unused executables, model weights and ML Python libraries are excluded.
 To verify a package without installing or changing the computer:
 
 ```bash
-dpkg-deb --info dist/sdxl-trainer_0.1.0_amd64.deb
-dpkg-deb --extract dist/sdxl-trainer_0.1.0_amd64.deb build/package-smoke
+dpkg-deb --info dist/sdxl-trainer_0.1.34_amd64.deb
+dpkg-deb --extract dist/sdxl-trainer_0.1.34_amd64.deb build/package-smoke
 build/package-smoke/opt/sdxl-trainer/runtime/llama/llama-server --version
 ```
 

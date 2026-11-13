@@ -27,8 +27,27 @@ htmlcov/
 *.pt
 *.pth
 *.bin
+*.onnx
+*.onnx_data
+*.h5
+*.hdf5
+*.tflite
+*.pb
+*.pkl
+*.pickle
 *.part
 *.part.json
+# App-generated image/caption pairs and manifests, including projects stored
+# in a custom location inside the checkout. Original images should still be
+# kept outside the repository; Git ignore rules are not a security boundary.
+Img-[0-9]*.png
+Img-[0-9]*.txt
+project.json
+caption-prompts.json
+training-settings.json
+**/finalized/
+**/runs/
+**/logs/
 /models/
 /datasets/
 /projects/

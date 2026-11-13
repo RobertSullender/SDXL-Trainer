@@ -35,6 +35,15 @@ SDXL_TRAINING_FILES = (
     "tokenizer_2/merges.txt", "tokenizer_2/vocab.json", "tokenizer_2/tokenizer_config.json", "tokenizer_2/special_tokens_map.json",
 )
 
+# Diffusers stores a model variant beside its canonical safetensors using the
+# component-specific `*.fp16.safetensors` names. Configuration and tokenizer
+# files are shared with the canonical model.
+SDXL_FP16_TRAINING_FILES = tuple(
+    name.removesuffix(".safetensors") + ".fp16.safetensors"
+    if name.endswith(".safetensors") else name
+    for name in SDXL_TRAINING_FILES
+)
+
 
 PRESETS = [
     {"name": "HauhauCS · Qwen3.5-9B Uncensored · Q8_0", "kind": "caption",
@@ -46,7 +55,11 @@ PRESETS = [
      "model_filename": "Qwen3.5-9B-Q8_0.gguf",
      "mmproj_filename": "mmproj-Qwen3.5-9B-BF16.gguf"},
     {"name": "Stability AI · SDXL Base 1.0 · Diffusers FP32", "kind": "sdxl",
-     "repo_id": "stabilityai/stable-diffusion-xl-base-1.0", "filenames": list(SDXL_TRAINING_FILES)},
+     "repo_id": "stabilityai/stable-diffusion-xl-base-1.0", "filenames": list(SDXL_TRAINING_FILES),
+     "model_variant": "default"},
+    {"name": "Stability AI · SDXL Base 1.0 · Diffusers FP16 variant", "kind": "sdxl",
+     "repo_id": "stabilityai/stable-diffusion-xl-base-1.0", "filenames": list(SDXL_FP16_TRAINING_FILES),
+     "destination_suffix": "--fp16", "model_variant": "fp16"},
 ]
 
 
@@ -63,6 +76,15 @@ class RepositorySnapshot:
     repo_id: str
     revision: str
     files: list[RemoteFile]
+
+
+def model_library_destination(library: str | Path, repo_id: str, preset: dict | None = None) -> Path:
+    """Keep preset variants apart so adding files cannot change an existing model fingerprint."""
+    repo = normalize_repository(repo_id)
+    suffix = preset.get("destination_suffix", "") if preset and preset.get("repo_id") == repo else ""
+    if not re.fullmatch(r"(?:--[A-Za-z0-9_-]+)?", suffix):
+        raise DownloadError("Invalid model preset destination suffix.")
+    return Path(library).expanduser() / (repo.replace("/", "--") + suffix)
 
 
 def selected_training_files(snapshot: RepositorySnapshot) -> list[str]:

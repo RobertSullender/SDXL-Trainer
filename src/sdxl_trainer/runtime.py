@@ -60,14 +60,24 @@ class RemoteTokenCounter:
             raise RuntimeError("Tokenizer runtime returned an invalid JSON response.")
         return result
 
-    def count(self, text):
-        from .tokens import TokenCounts
-        self.process.stdin.write(json.dumps({"text": text}) + "\n")
+    def _request(self, request):
+        self.process.stdin.write(json.dumps(request) + "\n")
         self.process.stdin.flush()
         result = self._read()
         if "error" in result:
             raise RuntimeError(result["error"])
-        return TokenCounts(**result)
+        return result
+
+    def count(self, text: str):
+        from .tokens import TokenCounts
+        return TokenCounts(**self._request({"text": text}))
+
+    def truncate(self, text: str) -> str:
+        result = self._request({"action": "truncate", "text": text})
+        prefix = result.get("text")
+        if not isinstance(prefix, str) or not text.startswith(prefix):
+            raise RuntimeError("Tokenizer runtime returned an invalid shortened caption.")
+        return prefix
 
     def close(self):
         process = getattr(self, "process", None)
@@ -111,14 +121,21 @@ def main(argv=None):
         print(json.dumps(result, indent=2))
         return 0
     try:
-        from dataclasses import asdict
         from .tokens import TokenCounter
         counter = TokenCounter.from_model(Path(args.model))
         print(json.dumps({"ready": True, "max_length": 77, "metadata": counter.metadata}), flush=True)
         for line in sys.stdin:
             try:
-                text = json.loads(line)["text"]
-                print(json.dumps(asdict(counter.count(text))), flush=True)
+                request = json.loads(line)
+                text = request["text"]
+                action = request.get("action", "count")
+                if action == "count":
+                    result = counter.count(text).to_dict()
+                elif action == "truncate":
+                    result = {"text": counter.truncate(text)}
+                else:
+                    raise ValueError(f"Unknown tokenizer action: {action!r}")
+                print(json.dumps(result), flush=True)
             except Exception as exc:
                 print(json.dumps({"error": str(exc)}), flush=True)
     except Exception as exc:

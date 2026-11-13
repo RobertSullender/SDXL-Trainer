@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sdxl-trainer"
-version = "0.1.0"
+version = "0.1.34"
 description = "Private, offline SDXL dataset preparation and training desktop application"
 readme = "README.md"
 license = "MIT"

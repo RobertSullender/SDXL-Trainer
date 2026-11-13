@@ -73,6 +73,14 @@ def vae_key(key):
     return "first_stage_model." + key
 
 
+def text_encoder_1_key(key):
+    # Transformers releases can save CLIP-L either with or without the model
+    # wrapper prefix. SDXL's single-file layout requires it in both cases.
+    if not key.startswith("text_model."):
+        key = "text_model." + key
+    return "conditioner.embedders.0.transformer." + key
+
+
 def text_encoder_2_key(key):
     key = key.replace("text_model.encoder.layers.", "transformer.resblocks.")
     key = key.replace("layer_norm1.", "ln_1.").replace("layer_norm2.", "ln_2.")
@@ -135,7 +143,7 @@ def export_checkpoint(model_path, output_path):
                         if re.search(r"\.mid\.attn_1\.(q|k|v|proj_out)\.weight$", converted) and tensor.ndim == 2:
                             tensor = tensor[:, :, None, None]
                     elif component == "text_encoder":
-                        converted = "conditioner.embedders.0.transformer." + key
+                        converted = text_encoder_1_key(key)
                     else:
                         match = re.fullmatch(r"(.+\.self_attn)\.([qkv])_proj\.(weight|bias)", key)
                         if match:

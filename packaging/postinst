@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+# dpkg can retain an existing directory's historical mode during an upgrade.
+# Repair only these package-owned runtime paths; user data is outside /opt.
+case "${1:-}" in
+    configure)
+        chmod 0755 -- \
+            /opt/sdxl-trainer/runtime/llama \
+            /opt/sdxl-trainer/runtime/llama/libexec
+        chmod 0755 -- \
+            /opt/sdxl-trainer/runtime/llama/llama-server \
+            /opt/sdxl-trainer/runtime/llama/libexec/llama-server
+        ;;
+esac
+
+exit 0

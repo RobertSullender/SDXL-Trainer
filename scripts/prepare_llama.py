@@ -58,6 +58,25 @@ def unpack_runtime(archive: Path, destination: Path) -> None:
                 raise ValueError(f"Unsupported archive member: {member.name}")
 
 
+def normalize_runtime_permissions(stage: Path) -> None:
+    """Publish a readable runtime while leaving its temporary root private until ready."""
+    root = stage.resolve()
+    for path in stage.rglob("*"):
+        if path.is_symlink():
+            if not path.resolve().is_relative_to(root):
+                raise ValueError(f"Runtime link escapes its installation: {path}")
+            continue
+        if path.is_dir():
+            path.chmod(0o755)
+        elif path.is_file():
+            executable = path.relative_to(stage).as_posix() in {"llama-server", "libexec/llama-server"}
+            path.chmod(0o755 if executable else 0o644)
+        else:
+            raise ValueError(f"Unsupported runtime file type: {path}")
+    # mkdtemp starts at 0700. Change the root only after all content is ready.
+    stage.chmod(0o755)
+
+
 def prepare(output: Path, cache: Path, offline: bool = False) -> Path:
     lock = json.loads(LOCK.read_text())
     output = output.resolve()
@@ -96,6 +115,7 @@ def prepare(output: Path, cache: Path, offline: bool = False) -> Path:
         result = subprocess.run([str(wrapper), "--version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, timeout=60, check=True)
         print(result.stdout.strip())
+        normalize_runtime_permissions(stage)
         stage.rename(output)
         return output
     finally:
